@@ -131,6 +131,12 @@ p {
     img#desktop {
         display: none;
     }
+    
+        footer {
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+    }
 }
 
 @media (min-width: 701px) {
@@ -153,5 +159,11 @@ p {
 
     .cart-button {
         width: 100%;
+    }
+    
+        footer {
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
     }
 }
