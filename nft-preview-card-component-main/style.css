@@ -1,0 +1,138 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap');
+
+body {
+    background-color: hsl(217, 54%, 11%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 95vh;
+}
+
+footer {
+    position: absolute;
+    bottom: 5px;
+}
+
+main {
+    background-color: hsl(216, 50%, 16%);
+    font-family: 'Outfit';
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    width: 300px;
+    height: 570px;
+    border-radius: 20px;
+    padding: 20px;
+}
+
+p {
+    color: hsl(215, 51%, 70%);
+    font-size: 18px;
+}
+
+h1 {
+    color: hsl(0, 0%, 100%);
+    font-size: 24px;
+    margin-top: 16px;
+}
+
+.name {
+    color: white;
+}
+
+.name:hover,
+h1:hover {
+    color: hsl(178, 100%, 50%);
+    cursor: pointer;
+
+}
+
+.price {
+    color: hsl(178, 100%, 50%);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.time {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.price img {
+    margin-right: 5px;
+    height: 18px;
+}
+
+.time img {
+    margin-right: 5px;
+    height: 18px;
+}
+
+.description {
+    font-weight: 300;
+}
+
+.picture {
+    width: 300px;
+    height: 300px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.overlay {
+    height: 300px;
+    width: 300px;
+    background-color: hsl(178, 100%, 50%);
+    border-radius: 11px;
+}
+
+.view-icon {
+    position: absolute;
+    width: 70px;
+    display: none;
+}
+
+.product-img {
+    background: url(images/image-equilibrium.jpg) no-repeat;
+    background-size: contain;
+    width: 300px;
+    height: 300px;
+    border-radius: 10px;
+    position: absolute;
+}
+
+.info {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.credit img {
+    width: 35px;
+    border: 2px solid white;
+    border-radius: 50%;
+    margin-right: 20px;
+}
+
+.product-img:hover~.view-icon {
+    display: block;
+}
+
+
+.product-img:hover {
+    cursor: pointer;
+    opacity: 50%;
+}
+
+.credit {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+}
