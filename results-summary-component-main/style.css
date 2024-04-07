@@ -1,0 +1,41 @@
+
+body {
+    min-height: 90vh;
+    font-family: 'HankenGrotesk';
+    background-color: hsl(0, 0%, 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.resultbar {
+    border-radius: 10px;
+    padding: 5px;
+}
+
+#reaction {
+    background-color: hsla(0, 100%, 67%, 20%);
+    color: hsla(0, 100%, 67%, 100%);
+}
+
+#memory {
+    background-color: hsla(39, 100%, 56%, 20%);
+    color: hsl(39, 100%, 56%);
+}
+
+#verbal {
+    background-color: hsla(166, 100%, 37%, 20%);
+    color: hsl(166, 100%, 37%);
+}
+
+#visual {
+    background-color: hsla(234, 85%, 45%, 20%);
+    color: hsl(234, 85%, 45%);
+}
+
+
+
+.resultbar h4, p {
+    display: inline;
+}
