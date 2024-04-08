@@ -9,6 +9,11 @@ body {
     justify-content: center;
 }
 
+footer {
+    position: absolute;
+    bottom: 5px;
+}
+
 .resultbar {
     border-radius: 10px;
     padding: 5px;
