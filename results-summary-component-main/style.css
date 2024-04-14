@@ -39,6 +39,16 @@ footer {
     color: hsl(234, 85%, 45%);
 }
 
+#continue {
+    background-color: hsl(224, 30%, 27%);
+    color: hsl(0, 0%, 100%)
+    ;
+}
+
+.button{
+    border-radius: 10px;
+}
+
 
 
 .resultbar h4, p {
