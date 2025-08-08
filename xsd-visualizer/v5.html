@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>XSD Visualizer</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/dagre-d3@0.6.4/dist/dagre-d3.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #f9fafb; }
+    h2 { padding: 10px 0 5px 15px; font-size: 1.1em; color: #2960a8; }
+    input, #search { margin-left: 15px; margin-bottom: 8px; }
+    #minimap { position: fixed; bottom: 16px; right: 18px; border: 1.5px solid #bbb; border-radius: 7px; background: #fff; box-shadow:0 2px 9px #eee; }
+    #minimap svg { width: 180px; height: 120px; }
+    svg.main { width: 99vw; height: 91vh; border: 1.2px solid #b6b9c7; background: #f9fafb; }
+    .node rect, .node polygon {
+      stroke-width: 1.6px; rx: 8px; ry: 8px;
+      filter: drop-shadow(0 2px 3px #edeff1);
+      transition: fill .16s,stroke .19s;
+    }
+    .node text { font-size: 13px; }
+    .element-type { color: #158084; }
+    .enum-block { font-size: 11px; color: #754c14; margin-top: 3px; }
+    .annotation { background: #e6f5fa; color: #215d74; font-size: 11px; margin-top: 5px; padding: 3px 6px; border-radius: 4px; white-space:pre-line; border:1px solid #d2e7f0;}
+    .attr-block { background: #f0f0f3; border: 1px solid #b8c9d1; border-radius: 5px; font-size: 12px; padding: 2px 4px 3px 4px; margin-bottom: 7px; min-width: 150px; }
+    .attr-block-title { font-weight:normal;color:#386; font-size:12px;}
+    .optional { font-style:italic;color:#bb6; }
+    .required { font-weight:bold; color: #197; }
+    .search-highlight rect { stroke: #ea467a !important; stroke-width: 3.2px !important; }
+    #search { margin-left:30px; padding:4px 7px; font-size: 1em; border:1px solid #bbb; border-radius:3px; }
+    #minimap-viewport { fill:none; stroke:#3b7; stroke-width:2.3; }
+    .has-children { font-size:18px; vertical-align:middle; color:#6ca8da; margin-right:4px; }
+    .collapsed { color:#6ca8da; }
+    .expanded { color:#3778b2; }
+    .leaf { color:#a7adb2; }
+    .paging-nav { color:#158084; font-size:14px; cursor:pointer; padding:2px 6px; border-radius:4px; background:#f6fbff; border:1.1px solid #bae; margin:0 2px;}
+    .paging-nav[disabled] { color:#ccc; border-color:#eee; background:#fafafa; cursor:not-allowed; }
+  </style>
+</head>
+<body>
+  <h2>XSD Visualizer <span style="font-weight:normal;color:#555;">(made with AI)</span></h2>
+  <input type="file" id="fileInput" accept=".xsd, text/xml">
+  <input id="search" placeholder="Knoten suchen… (Name oder Typ)">
+  <svg class="main"><g/></svg>
+  <div id="minimap"></div>
+<script>
+const CHUNK_SIZE = 8; // Genau 8 Child-Nodes pro Seite!
+const svg = d3.select("svg.main"),
+      inner = svg.select("g"),
+      zoom = d3.zoom().on("zoom", (event) => {
+        inner.attr("transform", event.transform);
+        updateMiniMapViewport();
+      });
+svg.call(zoom);
+
+let expandedNodes = new Set();
+const chunkState = {};
+let globalG = null, globalGraphData = null;
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    window.xsdString = reader.result;
+    expandedNodes = new Set();
+    Object.keys(chunkState).forEach(k => delete chunkState[k]);
+    visualize(window.xsdString);
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('search').addEventListener('input', function(e) {
+  const val = e.target.value.trim().toLowerCase();
+  if (!globalG) return;
+  highlightSearch(val);
+});
+
+function highlightSearch(val) {
+  inner.selectAll("g.node").classed("search-highlight", false);
+  if (!val) return;
+  globalG.nodes().forEach(n => {
+    const node = globalG.node(n);
+    if (!node) return;
+    let text = (node.name || "") + " " + (node.type || "");
+    if (text.toLowerCase().includes(val)) {
+      inner.selectAll("g.node").filter(function(v) { return v === n; }).classed("search-highlight", true);
+    }
+  });
+}
+
+function visualize(xmlString) {
+  const g = new dagreD3.graphlib.Graph({ multigraph: true })
+    .setGraph({ rankdir: "LR", nodesep: 40, ranksep: 40 })
+    .setDefaultEdgeLabel(() => ({}));
+
+  globalG = g;
+  // Parse
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(xmlString, 'application/xml');
+  if (xml.getElementsByTagName("parsererror").length) {
+    alert("XML Parsing Error: " + xml.getElementsByTagName("parsererror")[0].textContent);
+    return;
+  }
+  const schema = xml.documentElement;
+  // Typen-Map
+  const typeMap = {};
+  Array.from(schema.children).forEach(n => {
+    if (n.localName === "complexType" || n.localName === "simpleType") {
+      const tname = n.getAttribute("name");
+      if (tname) typeMap[tname] = n;
+    }
+  });
+  // Top-Level-Elemente
+  const topLevelElements = Array.from(schema.children)
+    .filter(n => n.localName === "element");
+  topLevelElements.forEach(el => processElement(el, null, g, typeMap, 0));
+  globalGraphData = { g, typeMap };
+  render(g);
+}
+
+function processElement(el, parentName, g, typeMap, depth) {
+  const name = el.getAttribute("name");
+  if (!name) return;
+
+  let type = el.getAttribute("type") || "";
+  let inlineBaseType = "";
+  Array.from(el.children).forEach(child => {
+    if (child.localName === "simpleType") {
+      const restriction = Array.from(child.children)
+        .find(n => n.localName === "restriction");
+      if (restriction && restriction.hasAttribute("base")) {
+        inlineBaseType = restriction.getAttribute("base");
+      }
+    }
+  });
+  if (!type && inlineBaseType) type = inlineBaseType;
+
+  const minOccurs = el.getAttribute("minOccurs") !== null ? el.getAttribute("minOccurs") : "1";
+  const maxOccurs = el.getAttribute("maxOccurs") !== null ? el.getAttribute("maxOccurs") : "1";
+  const isOptional = minOccurs === "0";
+  let nodeStyle = isOptional
+    ? "fill:#fdf8ee;stroke-dasharray: 5,3;stroke:#e5c699;"
+    : "fill:#e7f6fb;stroke:#489cc7;";
+
+  // Attribute-Block
+  let attributes = [];
+  Array.from(el.children).forEach(child => {
+    if (child.localName === "complexType") {
+      Array.from(child.getElementsByTagNameNS("http://www.w3.org/2001/XMLSchema", "attribute"))
+        .forEach(attrEl => attributes.push(formatAttribute(attrEl)));
+    }
+  });
+  let attrBlock = attributes.length > 0
+    ? `<div class="attr-block">
+         <span class="attr-block-title">attributes</span><br>
+         ${attributes.join("<br>")}
+       </div>` : "";
+
+  // Annotation
+  let documentation = getAnnotation(el);
+  let docBlock = documentation ? `<div class="annotation">${documentation}</div>` : "";
+
+  // Enum-Block: Nur wenn direkt im simpleType!
+  let enumBlock = "";
+  if (type && typeMap[type] && typeMap[type].localName === "simpleType") {
+    const enums = getDirectEnumsFromType(typeMap[type]);
+    if (enums.length > 0) {
+      enumBlock = `<div class="enum-block">Allowed values: ${enums.map(e=>`"${e}"`).join(", ")}</div>`;
+    }
+  }
+  Array.from(el.children).forEach(child => {
+    if (child.localName === "simpleType") {
+      const enums = getDirectEnumsFromType(child);
+      if (enums.length > 0) {
+        enumBlock = `<div class="enum-block">Allowed values: ${enums.map(e=>`"${e}"`).join(", ")}</div>`;
+      }
+    }
+  });
+
+  // Für Suche
+  let nodeData = { name, type };
+
+  // Children sammeln (für Symbol und Paging)
+  let children = [];
+  if (type && typeMap[type] && typeMap[type].localName === "complexType") {
+    const t = typeMap[type];
+    children = children.concat(getChildElementsFromType(t));
+  }
+  Array.from(el.children).forEach(child => {
+    if (child.localName === "complexType") {
+      children = children.concat(getChildElementsFromType(child));
+    }
+  });
+  // alphabetisch sortieren
+  children.sort((a, b) => {
+  const aOpt = (a.getAttribute("minOccurs") === "0") ? 1 : 0;
+  const bOpt = (b.getAttribute("minOccurs") === "0") ? 1 : 0;
+  if (aOpt !== bOpt) return aOpt - bOpt; // Pflicht vor Optional!
+  const an = a.getAttribute("name") || "";
+  const bn = b.getAttribute("name") || "";
+  return an.localeCompare(bn);
+});
+
+
+  // Paging: Index der aktuellen Seite, 0-basiert
+  const pageCount = Math.ceil(children.length / CHUNK_SIZE);
+  if (typeof chunkState[name] === 'undefined') chunkState[name] = 0;
+  let page = chunkState[name];
+
+  // Symbol: ► (collapsed, has children), ▼ (expanded), • (leaf)
+  let symbol = "";
+  if (children.length > 0) {
+    if (expandedNodes.has(name)) symbol = `<span class="has-children expanded" title="Zweig einklappen" style="margin-right:4px;">&#9660;</span>`;
+    else symbol = `<span class="has-children collapsed" title="Zweig aufklappen" style="margin-right:4px;">&#9654;</span>`;
+  } else {
+    symbol = `<span class="has-children leaf" title="Keine Unterelemente" style="margin-right:4px;">&#8226;</span>`;
+  }
+
+  let labelHtml = `<div style='text-align:left; min-width:215px; max-width:355px;'>
+    ${attrBlock}
+    <div style='display:flex;align-items:center;'>
+      ${symbol}
+      <span style='${isOptional ? "font-style:italic;color:#cca234;" : "font-weight:bold; font-size:13px;color:#115077;"} margin-bottom:1px;'>
+        ${name}
+      </span>
+    </div>
+    <div style="font-size:11px; color:#5a5a5a; margin-bottom:2px;">
+      <span style="margin-right:6px;"><b>type=</b><span class="element-type">${type}</span></span>
+      <b>minOccurs=</b><span style="color:#bb8b00">${minOccurs}</span>, 
+      <b>maxOccurs=</b><span style="color:#21729a">${maxOccurs}</span>
+    </div>
+    ${docBlock}
+    ${enumBlock}
+    </div>`;
+
+  g.setNode(name, {
+    labelType: "html",
+    label: labelHtml,
+    style: nodeStyle,
+    labelStyle: "",
+    tooltip: "",
+    ...nodeData
+  });
+
+  if (parentName) g.setEdge(parentName, name);
+
+  // Paging
+  if (expandedNodes.has(name) && children.length > 0) {
+  let startIdx = page * CHUNK_SIZE;
+  let shownChildren = children.slice(startIdx, startIdx + CHUNK_SIZE);
+  shownChildren.forEach(childEl => processElement(childEl, name, g, typeMap, depth + 1));
+  // Paging-Navi als eigene Nodes:
+  if (pageCount > 1) {
+    // Prev-Button
+    let prevNode = `${name}__paging_prev`;
+    g.setNode(prevNode, {
+      labelType: "html",
+      label: `<div class="paging-nav"${page===0?' style="color:#bbb;pointer-events:none;"':''}>&lt;</div>`,
+      style: "fill:#f6fbff;stroke:#bae;",
+    });
+    g.setEdge(name, prevNode);
+    g.node(prevNode).pagingNav = { name, dir: "prev" };
+    // Info
+    let infoNode = `${name}__paging_info`;
+    g.setNode(infoNode, {
+      labelType: "html",
+      label: `<div style="font-size:13px; text-align:center; background:#f6fbff; border-radius:4px;">Seite ${page+1}/${pageCount}</div>`,
+      style: "fill:#f6fbff;stroke:#fff;pointer-events:none;",
+    });
+    g.setEdge(name, infoNode);
+    // Next-Button
+    let nextNode = `${name}__paging_next`;
+    g.setNode(nextNode, {
+      labelType: "html",
+      label: `<div class="paging-nav"${page===pageCount-1?' style="color:#bbb;pointer-events:none;"':''}>&gt;</div>`,
+      style: "fill:#f6fbff;stroke:#bae;",
+    });
+    g.setEdge(name, nextNode);
+    g.node(nextNode).pagingNav = { name, dir: "next" };
+  }
+}
+}
+
+function getChildElementsFromType(typeNode) {
+  let children = [];
+  ["all", "sequence", "choice"].forEach(tag => {
+    Array.from(typeNode.getElementsByTagNameNS("http://www.w3.org/2001/XMLSchema", tag)).forEach(container => {
+      children = children.concat(Array.from(container.children).filter(e => e.localName === "element"));
+    });
+  });
+  children = children.concat(Array.from(typeNode.children).filter(e => e.localName === "element"));
+  return children;
+}
+
+function getDirectEnumsFromType(typeNode) {
+  let result = [];
+  if (!typeNode) return result;
+  if (typeNode.localName === "simpleType") {
+    let restriction = Array.from(typeNode.children).find(n => n.localName === "restriction");
+    if (restriction) {
+      Array.from(restriction.children).forEach(child => {
+        if (child.localName === "enumeration") {
+          const val = child.getAttribute("value");
+          if (val) result.push(val);
+        }
+      });
+    }
+  }
+  return result;
+}
+
+function getAnnotation(node) {
+  let result = "";
+  Array.from(node.children).forEach(child => {
+    if (child.localName === "annotation") {
+      Array.from(child.children).forEach(grandchild => {
+        if (grandchild.localName === "documentation") {
+          result = wrapText(grandchild.textContent.trim(), 100);
+        }
+      });
+    }
+  });
+  return result;
+}
+
+function formatAttribute(attrEl) {
+  const name = attrEl.getAttribute("name");
+  const type = attrEl.getAttribute("type") || "";
+  const use = attrEl.getAttribute("use") || "";
+  let useLabel = "";
+  if (use === "required") useLabel = ' <span class="required">[required]</span>';
+  if (use === "optional") useLabel = ' <span class="optional">[optional]</span>';
+  return `<span style="color:#356">@${name}</span>${type ? ' : ' + type : ''}${useLabel}`;
+}
+
+function wrapText(str, n) {
+  if (!str) return "";
+  let arr = [];
+  for (let i = 0; i < str.length; i += n)
+    arr.push(str.slice(i, i + n));
+  return arr.join("\n");
+}
+
+function render(g) {
+  inner.selectAll("*").remove();
+  const renderer = new dagreD3.render();
+  renderer(inner, g);
+
+  // Klick für Knoten und Paging
+  inner.selectAll("g.node")
+  .style("cursor", "pointer")
+  .on("click", function(event, v) {
+    let node = g.node(v);
+    // Paging Navigation erkannt?
+    if (node && node.pagingNav) {
+      let parent = node.pagingNav.name;
+      let page = chunkState[parent];
+      let dir = node.pagingNav.dir;
+      let pageCount = Math.ceil(
+        (getAllChildrenForName(parent).length) / CHUNK_SIZE
+      );
+      if (dir === "prev" && page > 0) chunkState[parent] = page - 1;
+      if (dir === "next" && page < pageCount-1) chunkState[parent] = page + 1;
+      visualize(window.xsdString);
+      event.stopPropagation();
+      return;
+    }
+    // Tree-Accordion wie gehabt
+    let path = getPathToRoot(g, v);
+    expandedNodes = new Set(path);
+    visualize(window.xsdString);
+  });
+
+
+  svg.call(zoom.transform, d3.zoomIdentity.translate(20, 20).scale(1));
+  updateMiniMap();
+}
+
+// Hilfsfunktion: Nur Pfad zum aktuellen Node bleibt offen
+function getPathToRoot(g, node) {
+  let path = [node];
+  let preds = g.predecessors(node);
+  while (preds && preds.length > 0) {
+    path.unshift(preds[0]);
+    preds = g.predecessors(preds[0]);
+  }
+  return path;
+}
+
+function getAllChildrenForName(name) {
+  // Suche das aktuell expandierte Element nach Name im globalGraphData
+  let typeMap = globalGraphData.typeMap;
+  let el = null;
+  // Suche in Top-Level
+  let tops = Object.values(globalGraphData.g._nodes).filter(n => n.name === name);
+  if (tops.length) el = tops[0];
+  // Oder über typeMap
+  if (!el && typeMap && typeMap[name]) el = typeMap[name];
+  if (!el) return [];
+  // Wie in processElement (ohne alphabetische Sortierung)
+  let children = [];
+  if (el.type && typeMap[el.type] && typeMap[el.type].localName === "complexType") {
+    children = children.concat(getChildElementsFromType(typeMap[el.type]));
+  }
+  // Im Node selbst (falls children gespeichert)
+  if (el.childrenList) children = children.concat(el.childrenList);
+  return children;
+}
+
+</script>
+</body>
+</html>
